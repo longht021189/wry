@@ -4,6 +4,7 @@
 
 mod drag_drop;
 mod util;
+mod custom;
 
 use std::{
   borrow::Cow, cell::RefCell, collections::HashSet, fmt::Write, path::PathBuf, rc::Rc, sync::mpsc,
@@ -411,6 +412,9 @@ impl InnerWebView {
           &mut token,
         )?
       };
+    } else {
+      // for custom
+      custom::INSTANCE.init_webview(&webview)?;
     }
 
     // Initialize scripts
