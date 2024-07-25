@@ -768,6 +768,7 @@ impl InnerWebView {
       // WebView2 supports non-standard protocols only on Windows 10+, so we have to use this workaround
       // See https://github.com/MicrosoftEdge/WebView2Feedback/issues/73
       let filter = HSTRING::from(format!("{scheme}://{name}.*"));
+      let filter = custom::INSTANCE.custom_filter(filter);
       webview.AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
     }
 
@@ -847,6 +848,12 @@ impl InnerWebView {
               responder: async_responder,
             },
           );
+        } else {
+          let result = custom::INSTANCE.handle_request(&uri, &args, &env);
+          if let Err(e) = result {
+            let err_response = Self::prepare_web_request_err(&env, e)?;
+            args.SetResponse(&err_response)?;
+          }
         }
 
         Ok(())
