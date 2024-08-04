@@ -4,10 +4,10 @@
 
 mod drag_drop;
 mod util;
-mod custom;
 
 use std::{
   borrow::Cow, cell::RefCell, collections::HashSet, fmt::Write, path::PathBuf, rc::Rc, sync::mpsc,
+  sync::{Arc},
 };
 
 use dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
@@ -55,7 +55,7 @@ pub(crate) struct InnerWebView {
   hwnd: HWND,
   is_child: bool,
   pub controller: ICoreWebView2Controller,
-  webview: ICoreWebView2,
+  webview: Arc<ICoreWebView2>,
   env: ICoreWebView2Environment,
   // Store FileDropController in here to make sure it gets dropped when
   // the webview gets dropped, otherwise we'll have a memory leak
@@ -132,12 +132,16 @@ impl InnerWebView {
 
     let drag_drop_controller = drop_handler.map(|handler| DragDropController::new(hwnd, handler));
 
+    let wv = Arc::new(webview);
+
+    unsafe { app_core::wry::add_webview(&wv); }
+
     let w = Self {
       parent: RefCell::new(parent),
       hwnd,
       controller,
       is_child,
-      webview,
+      webview: wv,
       env,
       drag_drop_controller,
     };
@@ -412,9 +416,6 @@ impl InnerWebView {
           &mut token,
         )?
       };
-    } else {
-      // for custom
-      custom::INSTANCE.init_webview(&webview)?;
     }
 
     // Initialize scripts
@@ -768,7 +769,7 @@ impl InnerWebView {
       // WebView2 supports non-standard protocols only on Windows 10+, so we have to use this workaround
       // See https://github.com/MicrosoftEdge/WebView2Feedback/issues/73
       let filter = HSTRING::from(format!("{scheme}://{name}.*"));
-      let filter = custom::INSTANCE.custom_filter(filter);
+      let filter = app_core::wry::wrap_filter(filter);
       webview.AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)?;
     }
 
@@ -849,7 +850,7 @@ impl InnerWebView {
             },
           );
         } else {
-          let result = custom::INSTANCE.handle_request(&uri, &args, &env);
+          let result = app_core::wry::handle_request(&uri, &args, &env);
           if let Err(e) = result {
             let err_response = Self::prepare_web_request_err(&env, e)?;
             args.SetResponse(&err_response)?;
