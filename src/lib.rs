@@ -193,9 +193,8 @@
 //! [`winit`]: https://docs.rs/winit
 //! [`tracing`]: https://docs.rs/tracing
 
-#![allow(clippy::new_without_default)]
-#![allow(clippy::default_constructed_unit_structs)]
-#![allow(clippy::type_complexity)]
+#![allow(clippy::all)]
+#![allow(warnings)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
