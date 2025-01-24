@@ -43,7 +43,7 @@ jobs:
         if: steps.covector.outputs.commandRan == 'version'
         run: cargo install cargo-readme --locked
 
-      - run: cargo readme --no-license > README.md
+      - run: cargo readme --no-title --no-license > README.md
         if: steps.covector.outputs.commandRan == 'version'
 
       - name: Create Pull Request With Versions Bumped
