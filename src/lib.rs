@@ -689,6 +689,9 @@ pub struct WebViewAttributes<'a> {
   ///
   /// see https://github.com/tauri-apps/tauri/issues/5250#issuecomment-2569380578
   pub background_throttling: Option<BackgroundThrottlingPolicy>,
+
+  /// Whether JavaScript should be disabled.
+  pub javascript_disabled: bool,
 }
 
 impl Default for WebViewAttributes<'_> {
@@ -730,6 +733,7 @@ impl Default for WebViewAttributes<'_> {
         size: dpi::LogicalSize::new(200, 200).into(),
       }),
       background_throttling: None,
+      javascript_disabled: false,
     }
   }
 }
@@ -1323,6 +1327,13 @@ impl<'a> WebViewBuilder<'a> {
   pub fn with_background_throttling(self, policy: BackgroundThrottlingPolicy) -> Self {
     self.and_then(|mut b| {
       b.attrs.background_throttling = Some(policy);
+      Ok(b)
+    })
+  }
+  /// Whether JavaScript should be disabled.
+  pub fn with_javascript_disabled(self) -> Self {
+    self.and_then(|mut b| {
+      b.attrs.javascript_disabled = true;
       Ok(b)
     })
   }

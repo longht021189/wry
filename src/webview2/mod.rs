@@ -569,6 +569,10 @@ impl InnerWebView {
       settings9.SetIsNonClientRegionSupportEnabled(true)?;
     }
 
+    if attributes.javascript_disabled {
+      settings.SetIsScriptEnabled(false)?;
+    }
+
     Ok(())
   }
 
