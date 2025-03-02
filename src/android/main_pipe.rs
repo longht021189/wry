@@ -341,6 +341,11 @@ impl<'a> MainPipe<'a> {
             load_html(&mut self.env, webview.as_obj(), &html)?;
           }
         }
+        WebViewMessage::Reload => {
+          if let Some(webview) = &self.webview {
+            reload(&mut self.env, webview.as_obj())?;
+          }
+        }
         WebViewMessage::GetCookies(tx, url) => {
           if let Some(webview) = &self.webview {
             let url = self.env.new_string(url)?;
@@ -425,6 +430,11 @@ fn load_html<'a>(env: &mut JNIEnv<'a>, webview: &JObject<'a>, html: &JString<'a>
   Ok(())
 }
 
+fn reload<'a>(env: &mut JNIEnv<'a>, webview: &JObject<'a>) -> JniResult<()> {
+  env.call_method(webview, "reload", "()V", &[])?;
+  Ok(())
+}
+
 fn set_background_color<'a>(
   env: &mut JNIEnv<'a>,
   webview: &JObject<'a>,
@@ -445,6 +455,7 @@ pub(crate) enum WebViewMessage {
   Jni(Box<dyn FnOnce(&mut JNIEnv, &JObject, &JObject) + Send>),
   LoadUrl(String, Option<http::HeaderMap>),
   LoadHtml(String),
+  Reload,
   ClearAllBrowsingData,
   OnDestroy,
 }

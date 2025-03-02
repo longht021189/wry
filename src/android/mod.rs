@@ -400,6 +400,11 @@ impl InnerWebView {
     Ok(())
   }
 
+  pub fn reload(&self) -> Result<()> {
+    MainPipe::send(WebViewMessage::Reload);
+    Ok(())
+  }
+
   pub fn clear_all_browsing_data(&self) -> Result<()> {
     MainPipe::send(WebViewMessage::ClearAllBrowsingData);
     Ok(())
