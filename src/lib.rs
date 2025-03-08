@@ -1391,14 +1391,14 @@ impl<'a> WebViewBuilder<'a> {
   }
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios",))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 #[derive(Clone, Default)]
 pub(crate) struct PlatformSpecificWebViewAttributes {
   data_store_identifier: Option<[u8; 16]>,
   traffic_light_inset: Option<dpi::Position>,
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios",))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 pub trait WebViewBuilderExtDarwin {
   /// Initialize the WebView with a custom data store identifier.
   /// Can be used as a replacement for data_directory not being available in WKWebView.
@@ -1415,7 +1415,7 @@ pub trait WebViewBuilderExtDarwin {
   fn with_traffic_light_inset<P: Into<dpi::Position>>(self, position: P) -> Self;
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios",))]
+#[cfg(any(target_os = "macos", target_os = "ios"))]
 impl WebViewBuilderExtDarwin for WebViewBuilder<'_> {
   fn with_data_store_identifier(self, identifier: [u8; 16]) -> Self {
     self.and_then(|mut b| {
@@ -2080,6 +2080,38 @@ impl WebViewExtUnix for WebView {
   }
 }
 
+/// Additional methods on `WebView` that are specific to macOS or iOS.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub trait WebViewExtDarwin {
+  /// Prints with extra options
+  fn print_with_options(&self, options: &PrintOptions) -> Result<()>;
+  /// Fetches all Data Store Identifiers of this application
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(cb: F) -> Result<()>;
+  /// Deletes a Data Store by an identifier.
+  ///
+  /// You must drop any WebView instances using the data store before you call this method.
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  fn remove_data_store<F: FnOnce(Result<()>) + Send + 'static>(uuid: &[u8; 16], cb: F);
+}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+impl WebViewExtDarwin for WebView {
+  fn print_with_options(&self, options: &PrintOptions) -> Result<()> {
+    self.webview.print_with_options(options)
+  }
+
+  fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(cb: F) -> Result<()> {
+    wkwebview::InnerWebView::fetch_data_store_identifiers(cb)
+  }
+
+  fn remove_data_store<F: FnOnce(Result<()>) + Send + 'static>(uuid: &[u8; 16], cb: F) {
+    wkwebview::InnerWebView::remove_data_store(uuid, cb)
+  }
+}
+
 /// Additional methods on `WebView` that are specific to macOS.
 #[cfg(target_os = "macos")]
 pub trait WebViewExtMacOS {
@@ -2091,7 +2123,7 @@ pub trait WebViewExtMacOS {
   fn ns_window(&self) -> Retained<NSWindow>;
   /// Attaches this webview to the given NSWindow and removes it from the current one.
   fn reparent(&self, window: *mut NSWindow) -> Result<()>;
-  // Prints with extra options
+  /// Prints with extra options
   fn print_with_options(&self, options: &PrintOptions) -> Result<()>;
   /// Move the window controls to the specified position.
   /// Normally this is handled by the Window but because `WebViewBuilder::build()` overwrites the window's NSView the controls will flicker on resizing.

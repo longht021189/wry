@@ -71,6 +71,7 @@ use once_cell::sync::Lazy;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 use std::{
+  cell::RefCell,
   collections::HashSet,
   ffi::{c_void, CStr, CString},
   net::Ipv4Addr,
@@ -994,6 +995,63 @@ r#"Object.defineProperty(window, 'ipc', {
     }
 
     Ok(())
+  }
+
+  /// Fetches all Data Store Identifiers of this application
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  pub fn fetch_data_store_identifiers<F: FnOnce(Vec<[u8; 16]>) + Send + 'static>(
+    cb: F,
+  ) -> crate::Result<()> {
+    // make the RcBlock callback be a FnOnce
+    let cb = RefCell::new(Some(cb));
+    let block = block2::RcBlock::new(move |stores: NonNull<NSArray<NSUUID>>| {
+      let uuid_list = unsafe { stores.as_ref() }
+        .to_vec()
+        .iter()
+        .map(|uuid| uuid.as_bytes())
+        .collect();
+      if let Some(cb) = cb.take() {
+        cb(uuid_list);
+      }
+    });
+
+    match MainThreadMarker::new() {
+      Some(mtn) => unsafe {
+        WKWebsiteDataStore::fetchAllDataStoreIdentifiers(&block, mtn);
+        Ok(())
+      },
+      None => Err(Error::NotMainThread),
+    }
+  }
+
+  /// Deletes a Data Store by an identifier
+  ///
+  /// Needs to run on main thread and needs an event loop to run.
+  pub fn remove_data_store<F: FnOnce(crate::Result<()>) + Send + 'static>(uuid: &[u8; 16], cb: F) {
+    let Some(mtm) = MainThreadMarker::new() else {
+      cb(Err(Error::NotMainThread));
+      return;
+    };
+    let identifier = NSUUID::from_bytes(uuid.to_owned());
+
+    // make the RcBlock callback be a FnOnce
+    let cb = RefCell::new(Some(cb));
+    let block = block2::RcBlock::new(move |error: *mut NSError| {
+      if error.is_null() {
+        if let Some(cb) = cb.take() {
+          cb(Ok(()));
+        }
+      } else {
+        if let Some(cb) = cb.take() {
+          cb(Err(Error::DataStoreInUse));
+        }
+      }
+    });
+
+    unsafe {
+      WKWebsiteDataStore::removeDataStoreForIdentifier_completionHandler(&identifier, &block, mtm);
+    }
   }
 }
 
