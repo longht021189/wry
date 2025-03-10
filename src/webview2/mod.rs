@@ -5,6 +5,8 @@
 mod drag_drop;
 mod util;
 
+use crate::custom;
+
 use std::{
   borrow::Cow, cell::RefCell, collections::HashSet, fmt::Write, fs, path::PathBuf, rc::Rc,
   sync::mpsc,
@@ -443,19 +445,19 @@ impl InnerWebView {
       .iter()
       .map(|n| n.0.clone())
       .collect();
-    if !attributes.custom_protocols.is_empty() {
-      unsafe {
-        Self::attach_custom_protocol_handler(
-          &webview,
-          env,
-          hwnd,
-          webview_id,
-          scheme,
-          &mut attributes,
-          &mut token,
-        )?
-      };
-    }
+
+    unsafe {
+      Self::attach_custom_protocol_handler(
+        &webview,
+        env,
+        hwnd,
+        webview_id,
+        scheme,
+        &mut attributes,
+        &mut token,
+      )?
+    };
+
 
     // Initialize main and subframe scripts
     for (js, _) in attributes
@@ -842,6 +844,8 @@ impl InnerWebView {
     attributes: &mut WebViewAttributes,
     token: &mut EventRegistrationToken,
   ) -> Result<()> {
+    custom::setup_custom_protocol_handler(webview)?;
+
     for name in attributes.custom_protocols.keys() {
       // WebView2 supports non-standard protocols only on Windows 10+, so we have to use this workaround
       // See https://github.com/MicrosoftEdge/WebView2Feedback/issues/73
@@ -875,23 +879,10 @@ impl InnerWebView {
         #[cfg(feature = "tracing")]
         span.record("uri", &uri);
 
-        if let Some((custom_protocol, custom_protocol_handler)) = custom_protocols
-          .iter()
-          .find(|(protocol, _)| is_custom_protocol_uri(&uri, scheme, protocol))
-        {
-          let request = match Self::prepare_request(scheme, custom_protocol, &webview_request, &uri)
-          {
-            Ok(req) => req,
-            Err(e) => {
-              let err_response = Self::prepare_web_request_err(&env, e)?;
-              args.SetResponse(&err_response)?;
-              return Ok(());
-            }
-          };
-
+        // Avoid duplicate code
+        let get_responder = |args: ICoreWebView2WebResourceRequestedEventArgs| {
           let env = env.clone();
           let deferral = args.GetDeferral();
-
           let async_responder = Box::new(move |sent_response| {
             let handler = move || {
               match Self::prepare_web_request_response(&env, &sent_response) {
@@ -917,14 +908,43 @@ impl InnerWebView {
             }
           });
 
+          RequestAsyncResponder {
+            responder: async_responder,
+          }
+        };
+
+        if custom::is_custom_uri(&uri) {
+          match Self::prepare_request(scheme, "https", &webview_request, &uri) {
+            Ok(request) => {
+              custom::override_network(request, get_responder(args));
+            }
+            Err(e) => {
+              let err_response = Self::prepare_web_request_err(&env, e)?;
+              args.SetResponse(&err_response)?;
+              return Ok(());
+            }
+          }
+        }
+        else if let Some((custom_protocol, custom_protocol_handler)) = custom_protocols
+          .iter()
+          .find(|(protocol, _)| is_custom_protocol_uri(&uri, scheme, protocol))
+        {
+          let request = match Self::prepare_request(scheme, custom_protocol, &webview_request, &uri)
+          {
+            Ok(req) => req,
+            Err(e) => {
+              let err_response = Self::prepare_web_request_err(&env, e)?;
+              args.SetResponse(&err_response)?;
+              return Ok(());
+            }
+          };
+
           #[cfg(feature = "tracing")]
           let _span = tracing::info_span!("wry::custom_protocol::call_handler").entered();
           custom_protocol_handler(
             &webview_id,
             request,
-            RequestAsyncResponder {
-              responder: async_responder,
-            },
+            get_responder(args),
           );
         }
 
