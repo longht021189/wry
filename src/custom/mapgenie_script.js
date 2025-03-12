@@ -22,11 +22,12 @@ function injectInputs(w) {
   }
 
   const xhr = new XMLHttpRequest();
-  xhr.open('GET', `/api/local/locations/${window.game.id}/${window.mapData.map.id}`, false);
+  xhr.open('GET', `/api/local/map-data/${window.game.id}/${window.mapData.map.id}`, false);
   xhr.send();
 
   if (xhr.status === 200) {
-    for (const location of JSON.parse(xhr.responseText)) {
+    const response = JSON.parse(xhr.responseText);
+    for (const location of response.locations) {
       window.user.locations[location] = true;
     }
   }

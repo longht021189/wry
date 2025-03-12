@@ -2,6 +2,16 @@ use std::fmt::Debug;
 use http::{HeaderMap, Method, Request, Response, StatusCode};
 use crate::RequestAsyncResponder;
 use super::{ads, client};
+use std::os::raw::c_char;
+use std::ffi::CStr;
+use std::str;
+
+extern "C" {
+    fn mapgenie_add_location(game_id: u64, map_id: u64, location_id: u64);
+    fn mapgenie_remove_location(game_id: u64, map_id: u64, location_id: u64);
+    fn mapgenie_get_map_data(game_id: u64, map_id: u64, length: *mut usize) -> *mut c_char;
+    fn free_buffer(ptr: *mut c_char);
+}
 
 macro_rules! option_to_result {
     ($option:expr, $error:expr) => {
@@ -57,68 +67,65 @@ fn inject_data(name: String, responder: RequestAsyncResponder) {
     ads::override_network_404(responder);
 }
 
-fn mapgenie_api(url: &String, request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
+unsafe fn mapgenie_api(url: &String, request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
     if url.starts_with("https://mapgenie.io/api/v1/user/locations/") {
         let location_id: u64 = url.split("/").last().unwrap().parse().unwrap();
         mapgenie_api_locations(location_id, request, responder);
     } else if url.starts_with("https://mapgenie.io/api/v1/user/notes") {
-
-    } else if url.starts_with("https://mapgenie.io/api/local/locations/") {
+        mapgenie_api_notes(request, responder);
+    } else if url.starts_with("https://mapgenie.io/api/local/map-data/") {
         mapgenie_api_locations_local(url, responder);
     }
 }
 
-fn mapgenie_api_locations_local(url: &String, responder: RequestAsyncResponder) {
+unsafe fn mapgenie_api_locations_local(url: &String, responder: RequestAsyncResponder) {
     let parts: Vec<u64> = url
-        .replace("https://mapgenie.io/api/local/locations/", "")
+        .replace("https://mapgenie.io/api/local/map-data/", "")
         .split("/")
         .map(|x| x.parse::<u64>().unwrap())
         .collect();
 
-    let file_name = format!("mapgenie_local_locations_{}_{}.json", parts[0], parts[1]);
-    let content = std::fs::read_to_string(file_name).unwrap_or("[]".to_string());
+    let mut length: usize = 0;
+    let buffer = mapgenie_get_map_data(parts[0], parts[1], &mut length);
+
+    if buffer.is_null() {
+        ads::override_network_404(responder);
+        return;
+    }
+
+    let result = CStr::from_ptr(buffer).to_str().unwrap();
+
+    free_buffer(buffer);
+
     let http_response = Response::builder()
         .header("content-type", "application/json; charset=utf-8")
         .status(StatusCode::OK)
-        .body(content.as_bytes().to_vec())
+        .body(result.as_bytes().to_vec())
         .unwrap();
 
     responder.respond(http_response);
 }
 
-fn mapgenie_api_locations_add(id: u64, game_id: &str, map_id: &str) {
-    let file_name = format!("mapgenie_local_locations_{}_{}.json", game_id, map_id);
-    let content = std::fs::read_to_string(&file_name).unwrap_or("[]".to_string());
-    let content = format!(
-        "{}{}{}]", 
-        content[..content.len() - 1].to_string(), 
-        if content.len() > 2 { "," } else { "" },
-        id
-    );
+unsafe fn mapgenie_api_locations(id: u64, request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
+    let map_id: u64 = request.headers()
+        .get("X-Map-ID")
+        .expect("X-Map-ID not found")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
 
-    std::fs::write(&file_name, content).unwrap();
-}
-
-fn mapgenie_api_locations_del(id: u64, game_id: &str, map_id: &str) {
-    let file_name = format!("mapgenie_local_locations_{}_{}.json", game_id, map_id);
-    let content = std::fs::read_to_string(&file_name).unwrap_or("[]".to_string());
-
-    let remove = format!("{id}]");
-    let content = content.replace(&remove, "]");
-
-    let remove = format!("{id},");
-    let content = content.replace(&remove, "");
-
-    std::fs::write(&file_name, content).unwrap();
-}
-
-fn mapgenie_api_locations(id: u64, request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
-    let map_id = request.headers().get("X-Map-ID").expect("X-Map-ID not found").to_str().unwrap();
-    let game_id = request.headers().get("X-Game-ID").expect("X-Game-ID not found").to_str().unwrap();
+    let game_id: u64 = request.headers()
+        .get("X-Game-ID")
+        .expect("X-Game-ID not found")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
 
     match request.method().clone() {
-        Method::PUT => { mapgenie_api_locations_add(id, game_id, map_id); }
-        Method::DELETE => { mapgenie_api_locations_del(id, game_id, map_id); }
+        Method::PUT => { mapgenie_add_location(game_id, map_id, id); }
+        Method::DELETE => { mapgenie_remove_location(game_id, map_id, id); }
         _ => {
             let http_response = Response::builder()
                 .header("content-type", "application/json; charset=utf-8")
@@ -194,4 +201,57 @@ fn edit_html_maps(html: &String) -> Result<String, Box<dyn Debug>> {
         "injectInputs(w);",
         &html[end..],
     ))
+}
+
+fn mapgenie_api_notes_create(game_id: &str, map_id: &str, body: &str) {
+    let file_name = format!("mapgenie_local_notes_{}_{}.json", game_id, map_id);
+    let content = std::fs::read_to_string(&file_name).unwrap_or("[]".to_string());
+}
+
+fn mapgenie_api_notes_update() {
+}
+
+fn mapgenie_api_notes_delete() {
+}
+
+fn mapgenie_api_notes(request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
+    let map_id = request.headers().get("X-Map-ID").expect("X-Map-ID not found").to_str().unwrap();
+    let game_id = request.headers().get("X-Game-ID").expect("X-Game-ID not found").to_str().unwrap();
+    let body = String::from_utf8(request.body().clone()).expect("Invalid UTF-8");
+
+    println!(">>>>>>>>>> map_id: {}", map_id);
+    println!(">>>>>>>>>> game_id: {}", game_id);
+    println!(">>>>>>>>>> body: {}", body);
+
+    match request.method().clone() {
+        Method::POST => { mapgenie_api_notes_create(game_id, map_id, &body); }
+        Method::PUT => { mapgenie_api_notes_update(); }
+        Method::DELETE => { mapgenie_api_notes_delete(); }
+        _ => {
+            let http_response = Response::builder()
+                .header("content-type", "application/json; charset=utf-8")
+                .status(StatusCode::METHOD_NOT_ALLOWED)
+                .body("{}".as_bytes().to_vec())
+                .unwrap();
+
+            responder.respond(http_response);
+            return;
+        }
+    }
+
+    let http_response = Response::builder()
+        .header("content-type", "a`pplication/json; charset=utf-8")
+        .status(StatusCode::METHOD_NOT_ALLOWED)
+        .body("{}".as_bytes().to_vec())
+        .unwrap();
+
+    responder.respond(http_response);
+
+    // let http_response = Response::builder()
+    //     .header("content-type", "application/json; charset=utf-8")
+    //     .status(StatusCode::OK)
+    //     .body("{}".as_bytes().to_vec())
+    //     .unwrap();
+
+    // responder.respond(http_response);
 }
