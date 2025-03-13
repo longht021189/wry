@@ -30,5 +30,6 @@ function injectInputs(w) {
     for (const location of response.locations) {
       window.user.locations[location] = true;
     }
+    window.mapData.notes = response.notes;
   }
 }

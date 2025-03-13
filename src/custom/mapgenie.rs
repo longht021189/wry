@@ -3,12 +3,17 @@ use http::{HeaderMap, Method, Request, Response, StatusCode};
 use crate::RequestAsyncResponder;
 use super::{ads, client};
 use std::os::raw::c_char;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::str;
 
 extern "C" {
+    fn mapgenie_add_note(game_id: u64, map_id: u64, body: *const c_char, count: i32) -> *mut c_char;
+    fn mapgenie_update_note(game_id: u64, map_id: u64, body: *const c_char, count: i32, note_id: *const c_char, note_id_len: i32) -> *mut c_char;
+    fn mapgenie_delete_note(game_id: u64, map_id: u64, note_id: *const c_char, note_id_len: i32);
+
     fn mapgenie_add_location(game_id: u64, map_id: u64, location_id: u64);
     fn mapgenie_remove_location(game_id: u64, map_id: u64, location_id: u64);
+
     fn mapgenie_get_map_data(game_id: u64, map_id: u64, length: *mut usize) -> *mut c_char;
     fn free_buffer(ptr: *mut c_char);
 }
@@ -203,30 +208,110 @@ fn edit_html_maps(html: &String) -> Result<String, Box<dyn Debug>> {
     ))
 }
 
-fn mapgenie_api_notes_create(game_id: &str, map_id: &str, body: &str) {
-    let file_name = format!("mapgenie_local_notes_{}_{}.json", game_id, map_id);
-    let content = std::fs::read_to_string(&file_name).unwrap_or("[]".to_string());
-}
+unsafe fn mapgenie_api_notes(request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
+    let map_id: u64 = request.headers()
+        .get("X-Map-ID")
+        .expect("X-Map-ID not found")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
 
-fn mapgenie_api_notes_update() {
-}
-
-fn mapgenie_api_notes_delete() {
-}
-
-fn mapgenie_api_notes(request: Request<Vec<u8>>, responder: RequestAsyncResponder) {
-    let map_id = request.headers().get("X-Map-ID").expect("X-Map-ID not found").to_str().unwrap();
-    let game_id = request.headers().get("X-Game-ID").expect("X-Game-ID not found").to_str().unwrap();
-    let body = String::from_utf8(request.body().clone()).expect("Invalid UTF-8");
-
-    println!(">>>>>>>>>> map_id: {}", map_id);
-    println!(">>>>>>>>>> game_id: {}", game_id);
-    println!(">>>>>>>>>> body: {}", body);
+    let game_id: u64 = request.headers()
+        .get("X-Game-ID")
+        .expect("X-Game-ID not found")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
 
     match request.method().clone() {
-        Method::POST => { mapgenie_api_notes_create(game_id, map_id, &body); }
-        Method::PUT => { mapgenie_api_notes_update(); }
-        Method::DELETE => { mapgenie_api_notes_delete(); }
+        Method::POST => {
+            let body = String::from_utf8(request.body().clone())
+                .expect("Invalid UTF-8");
+
+            let body_length = body.len();
+
+            let c_string = CString::new(body)
+                .expect("Invalid UTF-8");
+
+            let buffer = mapgenie_add_note(
+                game_id, 
+                map_id, 
+                c_string.as_ptr(), 
+                body_length.try_into().unwrap());
+
+            if !buffer.is_null() {
+                let result = CStr::from_ptr(buffer).to_str().unwrap();
+
+                free_buffer(buffer);
+
+                let http_response = Response::builder()
+                    .header("content-type", "application/json; charset=utf-8")
+                    .status(StatusCode::OK)
+                    .body(result.as_bytes().to_vec())
+                    .unwrap();
+
+                responder.respond(http_response);
+            } else {
+                ads::override_network_404(responder);
+            }
+        }
+        Method::PUT => {
+            let node_id = request.uri().path().split("/").last().unwrap();
+            let node_id_len = node_id.len();
+
+            let body = String::from_utf8(request.body().clone())
+                .expect("Invalid UTF-8");
+
+            let body_length = body.len();
+
+            let c_string = CString::new(body)
+                .expect("Invalid UTF-8");
+
+            let node_id_c = CString::new(node_id)
+                .expect("Invalid UTF-8");
+
+            let buffer = mapgenie_update_note(
+                game_id, 
+                map_id, 
+                c_string.as_ptr(), 
+                body_length.try_into().unwrap(),
+                node_id_c.as_ptr(),
+                node_id_len.try_into().unwrap());
+
+            if !buffer.is_null() {
+                let result = CStr::from_ptr(buffer).to_str().unwrap();
+
+                free_buffer(buffer);
+
+                let http_response = Response::builder()
+                    .header("content-type", "application/json; charset=utf-8")
+                    .status(StatusCode::OK)
+                    .body(result.as_bytes().to_vec())
+                    .unwrap();
+
+                responder.respond(http_response);
+            } else {
+                ads::override_network_404(responder);
+            }
+        }
+        Method::DELETE => {
+            let node_id = request.uri().path().split("/").last().unwrap();
+            let node_id_len = node_id.len();
+            let c_string = CString::new(node_id)
+                .expect("Invalid UTF-8");
+
+            mapgenie_delete_note(game_id, map_id, c_string.as_ptr(), node_id_len.try_into().unwrap());
+
+            let http_response = Response::builder()
+                .header("content-type", "application/json; charset=utf-8")
+                .status(StatusCode::NO_CONTENT)
+                .body("".as_bytes().to_vec())
+                .unwrap();
+
+            responder.respond(http_response);
+        }
         _ => {
             let http_response = Response::builder()
                 .header("content-type", "application/json; charset=utf-8")
@@ -238,20 +323,4 @@ fn mapgenie_api_notes(request: Request<Vec<u8>>, responder: RequestAsyncResponde
             return;
         }
     }
-
-    let http_response = Response::builder()
-        .header("content-type", "a`pplication/json; charset=utf-8")
-        .status(StatusCode::METHOD_NOT_ALLOWED)
-        .body("{}".as_bytes().to_vec())
-        .unwrap();
-
-    responder.respond(http_response);
-
-    // let http_response = Response::builder()
-    //     .header("content-type", "application/json; charset=utf-8")
-    //     .status(StatusCode::OK)
-    //     .body("{}".as_bytes().to_vec())
-    //     .unwrap();
-
-    // responder.respond(http_response);
 }
