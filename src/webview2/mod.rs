@@ -542,9 +542,10 @@ impl InnerWebView {
   ) -> Result<()> {
     let settings = webview.Settings()?;
     settings.SetIsStatusBarEnabled(false)?;
-    settings.SetAreDefaultContextMenusEnabled(true)?;
+    settings.SetAreDefaultContextMenusEnabled(pl_attrs.default_context_menus)?;
     settings.SetIsZoomControlEnabled(attributes.zoom_hotkeys_enabled)?;
     settings.SetAreDevToolsEnabled(attributes.devtools)?;
+    settings.SetIsScriptEnabled(!attributes.javascript_disabled)?;
 
     if let Some(user_agent) = &attributes.user_agent {
       if let Ok(settings2) = settings.cast::<ICoreWebView2Settings2>() {
@@ -568,10 +569,6 @@ impl InnerWebView {
 
     if let Ok(settings9) = settings.cast::<ICoreWebView2Settings9>() {
       settings9.SetIsNonClientRegionSupportEnabled(true)?;
-    }
-
-    if attributes.javascript_disabled {
-      settings.SetIsScriptEnabled(false)?;
     }
 
     Ok(())
@@ -1570,7 +1567,7 @@ impl InnerWebView {
   }
 
   pub fn set_background_color(&self, background_color: RGBA) -> Result<()> {
-    unsafe { set_background_color(&self.controller, background_color).map_err(Into::into) }
+    unsafe { set_background_color(&self.controller, background_color) }
   }
 
   pub fn set_memory_usage_level(&self, level: MemoryUsageLevel) -> Result<()> {
