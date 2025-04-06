@@ -538,6 +538,9 @@ r#"Object.defineProperty(window, 'ipc', {
         w.navigate_to_string(&html);
       }
 
+      // Allow Link Preview
+      w.webview.setAllowsLinkPreview(pl_attrs.allow_link_preview);
+
       // Inject the web view into the window as main content
       #[cfg(target_os = "macos")]
       {
