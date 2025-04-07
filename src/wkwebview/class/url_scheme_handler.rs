@@ -24,7 +24,7 @@ use objc2_foundation::{
 };
 use objc2_web_kit::{WKURLSchemeHandler, WKURLSchemeTask};
 
-use crate::{wkwebview::WEBVIEW_IDS, RequestAsyncResponder, WryWebView};
+use crate::{wkwebview::WEBVIEW_STATE, RequestAsyncResponder, WryWebView};
 
 pub fn create(name: &str) -> &AnyClass {
   unsafe {
@@ -33,8 +33,8 @@ pub fn create(name: &str) -> &AnyClass {
     let cls = ClassBuilder::new(scheme_name, NSObject::class());
     match cls {
       Some(mut cls) => {
-        cls.add_ivar::<*mut c_void>(c"function");
         cls.add_ivar::<*mut c_char>(c"webview_id");
+        cls.add_ivar::<usize>(c"protocol_index");
         cls.add_method(
           objc2::sel!(webView:startURLSchemeTask:),
           start_task as extern "C" fn(_, _, _, _),
@@ -72,12 +72,16 @@ extern "C" fn start_task(
       .ok()
       .unwrap_or_default();
 
-    let ivar = this.class().instance_variable(c"function").unwrap();
-    let function: &*mut c_void = ivar.load(this);
-    if !function.is_null() {
-      let function = &mut *(*function
-        as *mut Box<dyn Fn(crate::WebViewId, Request<Vec<u8>>, RequestAsyncResponder)>);
+    let ivar = this.class().instance_variable(c"protocol_index").unwrap();
+    let protocol_index: usize = *ivar.load(this);
 
+    let function = WEBVIEW_STATE.with_borrow(|v| {
+      v.get(webview_id)
+        .and_then(|v| v.protocol_ptrs.get(protocol_index))
+        .cloned()
+    });
+
+    if let Some(function) = function {
       // Get url request
       let request = task.request();
       let url = request.URL().unwrap();
@@ -143,7 +147,7 @@ extern "C" fn start_task(
       };
 
       fn check_webview_id_valid(webview_id: &str) -> crate::Result<()> {
-        if !WEBVIEW_IDS.lock().unwrap().contains(webview_id) {
+        if !WEBVIEW_STATE.with_borrow(|s| s.contains_key(webview_id)) {
           return Err(crate::Error::CustomProtocolTaskInvalid);
         }
         Ok(())
@@ -284,15 +288,14 @@ extern "C" fn start_task(
                 }))
                 .map_err(|_e| crate::Error::CustomProtocolTaskInvalid)?;
 
-                {
-                  let ids = WEBVIEW_IDS.lock().unwrap();
-                  if ids.contains(webview_id) {
+                WEBVIEW_STATE.with_borrow_mut(|ids| {
+                  if ids.contains_key(webview_id) {
                     webview.remove_custom_task_key(task_key);
                     Ok(())
                   } else {
                     Err(crate::Error::CustomProtocolTaskInvalid)
                   }
-                }
+                })
               }
 
               #[cfg(feature = "tracing")]
@@ -314,6 +317,7 @@ extern "C" fn start_task(
 
           #[cfg(feature = "tracing")]
           let _span = tracing::info_span!("wry::custom_protocol::call_handler").entered();
+
           function(
             webview_id,
             final_request,
@@ -327,7 +331,7 @@ extern "C" fn start_task(
       tracing::warn!(
         "Either WebView or WebContext instance is dropped! This handler shouldn't be called."
       );
-    }
+    };
   }
 }
 
