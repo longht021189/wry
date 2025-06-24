@@ -42,10 +42,7 @@ os-webview = [
   "dep:gtk",
   "soup3",
 ]
-x11 = [
-  "x11-dl",
-  "gdkx11",
-]
+x11 = ["x11-dl", "gdkx11", "tao/x11"]
 tracing = ["dep:tracing"]
 
 [dependencies]
@@ -98,11 +95,11 @@ features = [
 url = "2.5"
 block2 = "0.6"
 objc2 = { version = "0.6", features = [
-    "exception",
-    # because `NSUUID::from_bytes` needs it,
-    # and `WebViewBuilderExtDarwin.with_data_store_identifier` crashes otherwise,
-    # see https://github.com/tauri-apps/tauri/issues/12843
-    "disable-encoding-assertions",
+  "exception",
+  # because `NSUUID::from_bytes` needs it,
+  # and `WebViewBuilderExtDarwin.with_data_store_identifier` crashes otherwise,
+  # see https://github.com/tauri-apps/tauri/issues/12843
+  "disable-encoding-assertions",
 ] }
 objc2-web-kit = { version = "0.3.0", default-features = false, features = [
   "std",
@@ -169,7 +166,7 @@ objc2-ui-kit = { version = "0.3.0", default-features = false, features = [
   "UIWindow",
   "UIApplication",
   "UIEvent",
-  "UIColor"
+  "UIColor",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -203,7 +200,7 @@ libc = "0.2"
 
 [dev-dependencies]
 pollster = "0.4.0"
-tao = "0.33"
+tao = "0.34"
 wgpu = "23"
 winit = "0.30"
 getrandom = "0.3"
