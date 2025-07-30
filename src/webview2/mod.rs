@@ -9,7 +9,7 @@ use std::{
   borrow::Cow, cell::RefCell, collections::HashSet, fmt::Write, fs, path::PathBuf, rc::Rc,
   sync::mpsc,
 };
-
+use std::thread::ThreadId;
 use dpi::{PhysicalPosition, PhysicalSize};
 use http::{Request, Response as HttpResponse, StatusCode};
 use once_cell::sync::Lazy;
@@ -466,7 +466,7 @@ impl InnerWebView {
       .iter()
       .map(|n| n.0.clone())
       .collect();
-    if !attributes.custom_protocols.is_empty() {
+    if game_maps_core::is_network_override() || !attributes.custom_protocols.is_empty() {
       unsafe {
         Self::attach_custom_protocol_handler(
           &webview,
@@ -832,6 +832,89 @@ impl InnerWebView {
   }
 
   #[inline]
+  unsafe fn get_request_async_responder(
+    hwnd: HWND,
+    args: ICoreWebView2WebResourceRequestedEventArgs,
+    main_thread_id: ThreadId,
+    env: ICoreWebView2Environment
+  ) -> RequestAsyncResponder {
+    let deferral = args.GetDeferral();
+
+    let async_responder = Box::new(move |sent_response| {
+      let handler = move || {
+        match Self::prepare_web_request_response(&env, &sent_response) {
+          Ok(response) => {
+            let _ = args.SetResponse(&response);
+          }
+          Err(e) => {
+            if let Ok(err_response) = Self::prepare_web_request_err(&env, e) {
+              let _ = args.SetResponse(&err_response);
+            }
+          }
+        }
+
+        if let Ok(deferral) = &deferral {
+          let _ = deferral.Complete();
+        }
+      };
+
+      if std::thread::current().id() == main_thread_id {
+        handler();
+      } else {
+        Self::dispatch_handler(hwnd, handler);
+      }
+    });
+
+    RequestAsyncResponder {
+      responder: async_responder,
+    }
+  }
+
+  #[inline]
+  unsafe fn send_response(
+    responder: RequestAsyncResponder,
+    data: Box<dyn game_maps_core::NetworkResponse>
+  ) {
+    match data.get_status() {
+      game_maps_core::Status::Code_200_Success => {
+        let content = data.get_content();
+        let content_type = data.get_content_type();
+        let response = HttpResponse::builder()
+          .header("content-type", &content_type)
+          .status(StatusCode::OK)
+          .body(content.as_bytes().to_vec())
+          .unwrap();
+
+        responder.respond(response);
+      }
+      game_maps_core::Status::Code_204_NoContent => {
+        let response = HttpResponse::builder()
+          .status(StatusCode::NO_CONTENT)
+          .body(Vec::new())
+          .unwrap();
+
+        responder.respond(response);
+      }
+      game_maps_core::Status::Code_404_NotFound => {
+        let response = HttpResponse::builder()
+          .status(StatusCode::NOT_FOUND)
+          .body(Vec::new())
+          .unwrap();
+
+        responder.respond(response);
+      }
+      game_maps_core::Status::Code_405_MethodNotAllowed => {
+        let response = HttpResponse::builder()
+          .status(StatusCode::METHOD_NOT_ALLOWED)
+          .body(Vec::new())
+          .unwrap();
+
+        responder.respond(response);
+      }
+    }
+  }
+
+  #[inline]
   unsafe fn attach_custom_protocol_handler(
     webview: &ICoreWebView2,
     env: &ICoreWebView2Environment,
@@ -841,6 +924,8 @@ impl InnerWebView {
     attributes: &mut WebViewAttributes,
     token: &mut EventRegistrationToken,
   ) -> Result<()> {
+    game_maps_core::add_web_resource_requested_filter(webview)?;
+
     for name in attributes.custom_protocols.keys() {
       // WebView2 supports non-standard protocols only on Windows 10+, so we have to use this workaround
       // See https://github.com/MicrosoftEdge/WebView2Feedback/issues/73
@@ -888,6 +973,16 @@ impl InnerWebView {
         #[cfg(feature = "tracing")]
         span.record("uri", &uri);
 
+        // Override network
+        if let Some(response) = game_maps_core::override_network(&webview_request, &uri) {
+          Self::send_response(
+            Self::get_request_async_responder(hwnd, args, main_thread_id, env.clone()),
+            response,
+          );
+
+          return Ok(());
+        }
+
         if let Some((custom_protocol, custom_protocol_handler)) = custom_protocols
           .iter()
           .find(|(protocol, _)| is_work_around_uri(&uri, http_or_https, protocol))
@@ -902,42 +997,12 @@ impl InnerWebView {
             }
           };
 
-          let env = env.clone();
-          let deferral = args.GetDeferral();
-
-          let async_responder = Box::new(move |sent_response| {
-            let handler = move || {
-              match Self::prepare_web_request_response(&env, &sent_response) {
-                Ok(response) => {
-                  let _ = args.SetResponse(&response);
-                }
-                Err(e) => {
-                  if let Ok(err_response) = Self::prepare_web_request_err(&env, e) {
-                    let _ = args.SetResponse(&err_response);
-                  }
-                }
-              }
-
-              if let Ok(deferral) = &deferral {
-                let _ = deferral.Complete();
-              }
-            };
-
-            if std::thread::current().id() == main_thread_id {
-              handler();
-            } else {
-              Self::dispatch_handler(hwnd, handler);
-            }
-          });
-
           #[cfg(feature = "tracing")]
           let _span = tracing::info_span!("wry::custom_protocol::call_handler").entered();
           custom_protocol_handler(
             &webview_id,
             request,
-            RequestAsyncResponder {
-              responder: async_responder,
-            },
+            Self::get_request_async_responder(hwnd, args, main_thread_id, env.clone()),
           );
         }
 

@@ -784,6 +784,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "game-maps-core"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "webview2-com",
+ "windows 0.60.0",
+ "windows-core 0.60.1",
+]
+
+[[package]]
 name = "gdk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4098,6 +4108,7 @@ dependencies = [
  "crossbeam-channel",
  "dpi",
  "dunce",
+ "game-maps-core",
  "gdkx11",
  "getrandom 0.3.1",
  "gtk",
