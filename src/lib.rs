@@ -255,6 +255,7 @@
 //! ```bash
 //! RUSTFLAGS="-l framework=WebKit" cargo build --target=x86_64-apple-darwin --release
 //! ```
+//!
 //! ### Windows
 //!
 //! WebView2 provided by Microsoft Edge Chromium is used. So wry supports Windows 7, 8, 10 and 11.
@@ -262,6 +263,7 @@
 //! ### Android
 //!
 //! In order for `wry` to be able to create webviews on Android, there are a few requirements that your application needs to uphold:
+//!
 //! 1. You need to set a few environment variables that will be used to generate the necessary kotlin
 //!    files that you need to include in your Android application for wry to function properly.
 //!    - `WRY_ANDROID_PACKAGE`: which is the reversed domain name of your android project and the app name in snake_case, for example, `com.wry.example.wry_app`
@@ -271,7 +273,7 @@
 //! 3. Your Rust app needs to call `wry::android_setup` function to setup the necessary logic to be able to create webviews later on.
 //! 4. Your Rust app needs to call `wry::android_binding!` macro to setup the JNI functions that will be called by `WryActivity` and various other places.
 //!
-//! It is recommended to use [`tao`](https://docs.rs/tao/latest/tao/) crate as it provides maximum compatibility with `wry`
+//! It is recommended to use the [`tao`](https://docs.rs/tao/latest/tao/) crate as it provides maximum compatibility with `wry`.
 //!
 //! ```
 //! #[cfg(target_os = "android")]
