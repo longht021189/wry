@@ -12,6 +12,7 @@ use std::{
   borrow::Cow,
   cell::RefCell,
   collections::VecDeque,
+  env::current_dir,
   path::{Path, PathBuf},
   rc::Rc,
   sync::{
@@ -312,27 +313,49 @@ impl WebContextExt for super::WebContext {
   ) {
     let context = &self.os.context;
 
-    let download_started_handler = RefCell::new(download_started_handler);
+    let download_started_handler = Rc::new(RefCell::new(download_started_handler));
     let failed = Rc::new(RefCell::new(false));
 
     context.connect_download_started(move |_context, download| {
-      if let Some(uri) = download.request().and_then(|req| req.uri()) {
-        let uri = uri.to_string();
-        let mut download_location = download
-          .destination()
-          .map(PathBuf::from)
-          .unwrap_or_default();
+      let download_started_handler = download_started_handler.clone();
+      download.connect_decide_destination(move |download, suggested_filename| {
+        if let Some(uri) = download.request().and_then(|req| req.uri()) {
+          let uri = uri.to_string();
 
-        if let Some(download_started_handler) = download_started_handler.borrow_mut().as_mut() {
-          if download_started_handler(uri, &mut download_location) {
-            download.connect_response_notify(move |download| {
+          if let Some(download_started_handler) = download_started_handler.borrow_mut().as_mut() {
+            let mut download_location =
+              dirs::download_dir().unwrap_or_else(|| current_dir().unwrap_or_default());
+
+            let (mut suggested_filename, mut ext) = suggested_filename
+              .split_once('.')
+              .map(|(base, ext)| (base, format!(".{ext}")))
+              .unwrap_or((suggested_filename, "".to_string()));
+
+            // for `data:` downloads, webkitgtk will suggest to use the raw data as the filename
+            // for example `"data:attachment/text,sometext"` will result in `text,sometext`
+            if uri.starts_with("data:") {
+              suggested_filename = "Unknown";
+            }
+
+            download_location.push(format!("{suggested_filename}{ext}"));
+
+            // WebView2 does not overwrite files but appends numbers
+            let mut counter = 1;
+            while download_location.exists() {
+              download_location.set_file_name(format!("{suggested_filename} ({counter}){ext}"));
+              counter += 1;
+            }
+
+            if download_started_handler(uri, &mut download_location) {
               download.set_destination(&download_location.to_string_lossy());
-            });
-          } else {
-            download.cancel();
+            } else {
+              download.cancel();
+            }
           }
         }
-      }
+        // TODO: check if we may also need `false`
+        true
+      });
 
       download.connect_failed({
         let failed = failed.clone();
