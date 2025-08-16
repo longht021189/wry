@@ -78,7 +78,7 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::{
   cell::RefCell,
   collections::HashMap,
-  ffi::{CStr, CString},
+  ffi::CString,
   net::Ipv4Addr,
   os::raw::c_char,
   panic::AssertUnwindSafe,
@@ -207,6 +207,15 @@ impl InnerWebView {
 
     // Safety: objc runtime calls are unsafe
     unsafe {
+      #[cfg(target_os = "macos")]
+      let using_existing_config = pl_attrs.webview_configuration.is_some();
+      #[cfg(target_os = "ios")]
+      let using_existing_config = false;
+      #[cfg(target_os = "macos")]
+      let config = pl_attrs
+        .webview_configuration
+        .unwrap_or_else(|| WKWebViewConfiguration::new(mtm));
+      #[cfg(target_os = "ios")]
       let config = WKWebViewConfiguration::new(mtm);
 
       // Incognito mode
@@ -234,6 +243,17 @@ impl InnerWebView {
       // Register Custom Protocols
       let mut protocol_ptrs = Vec::new();
       for (name, function) in attributes.custom_protocols {
+        let already_registered = using_existing_config
+          && config
+            .urlSchemeHandlerForURLScheme(&NSString::from_str(&name))
+            .is_some();
+
+        if already_registered {
+          #[cfg(feature = "tracing")]
+          tracing::debug!("Custom protocol {} already registered", name);
+          continue;
+        }
+
         let url_scheme_handler_cls = url_scheme_handler::create(&name);
         let handler: *mut AnyObject = objc2::msg_send![url_scheme_handler_cls, new];
         let protocol_index = protocol_ptrs.len();
@@ -241,7 +261,7 @@ impl InnerWebView {
 
         let ivar = (*handler)
           .class()
-          .instance_variable(CStr::from_bytes_with_nul(b"protocol_index\0").unwrap())
+          .instance_variable(c"protocol_index")
           .unwrap();
         let ivar_delegate: &mut usize = ivar.load_mut(&mut *handler);
         *ivar_delegate = protocol_index;
