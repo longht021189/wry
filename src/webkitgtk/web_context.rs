@@ -5,7 +5,10 @@
 //! Unix platform extensions for [`WebContext`](super::WebContext).
 
 use crate::{Error, RequestAsyncResponder};
-use gtk::glib::{self, MainContext, ObjectExt};
+use gtk::{
+  glib::{self, MainContext, ObjectExt},
+  traits::WidgetExt,
+};
 use http::{header::CONTENT_TYPE, HeaderName, HeaderValue, Request, Response as HttpResponse};
 use soup::{MessageHeaders, MessageHeadersType};
 use std::{
@@ -474,13 +477,36 @@ impl WebViewUriLoader {
         headers,
       }) = self.pop()
       {
-        // we do not need to listen to failed events because those will finish the change event anyways
-        webview.connect_load_changed(move |_, event| {
+        // ensure that the lock is released when the webview is destroyed before LoadEvent::Finished is handled
+        let self_ = self.clone();
+        let destroy_id = webview.connect_destroy(move |_| {
+          self_.unlock();
+          self_.clone().flush();
+        });
+        let destroy_id_guard = Mutex::new(Some(destroy_id));
+
+        let load_changed_id_guard = Rc::new(Mutex::new(None));
+        let load_changed_id_guard_ = load_changed_id_guard.clone();
+        let self_ = self.clone();
+        // noet: we do not need to listen to failed events because those will finish the change event anyways
+        let load_changed_id = webview.connect_load_changed(move |w, event| {
           if let LoadEvent::Finished = event {
-            self.unlock();
-            self.clone().flush();
+            self_.unlock();
+            self_.clone().flush();
+
+            // unregister listeners
+            if let Some(id) = destroy_id_guard.lock().unwrap().take() {
+              w.disconnect(id);
+            }
+            if let Some(id) = load_changed_id_guard_.lock().unwrap().take() {
+              w.disconnect(id);
+            }
           };
         });
+        load_changed_id_guard
+          .lock()
+          .unwrap()
+          .replace(load_changed_id);
 
         if let Some(headers) = headers {
           let req = URIRequest::builder().uri(&uri).build();
