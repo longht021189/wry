@@ -366,8 +366,7 @@ impl InnerWebView {
 
     // Navigation
     if let Some(url) = attributes.url {
-      web_context.queue_load_uri(w.webview.clone(), url, attributes.headers);
-      web_context.flush_queue_loader();
+      web_context.load_uri(w.webview.clone(), url, attributes.headers);
     } else if let Some(html) = attributes.html {
       w.webview.load_html(&html, None);
     }
@@ -670,7 +669,7 @@ impl InnerWebView {
     is_inspector_open
   }
 
-  pub fn id(&self) -> crate::WebViewId {
+  pub fn id(&self) -> crate::WebViewId<'_> {
     &self.id
   }
 
