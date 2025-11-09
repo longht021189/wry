@@ -28,6 +28,7 @@ use std::{
   sync::{mpsc::channel, Mutex},
   time::Duration,
 };
+use crate::custom::{get_navigation_handler, get_request_handler};
 
 pub(crate) mod binding;
 mod main_pipe;
@@ -216,7 +217,7 @@ impl InnerWebView {
     let initialization_scripts_ = initialization_scripts.clone();
     REQUEST_HANDLER.lock()
         .unwrap().replace(
-      UnsafeRequestHandler::new(Box::new(
+      UnsafeRequestHandler::new(get_request_handler(Box::new(
         move |webview_id: &str, mut request, is_document_start_script_enabled| {
           let uri = request.uri().to_string();
           if let Some((custom_protocol_uri, custom_protocol_closure)) = custom_protocols.iter().find(|(name, _)| {
@@ -296,7 +297,7 @@ impl InnerWebView {
           }
           None
         },
-      )
+      ))
     ));
 
     if let Some(i) = ipc_handler {
@@ -310,7 +311,7 @@ impl InnerWebView {
         .replace(UnsafeTitleHandler::new(i));
     }
 
-    if let Some(i) = attributes.navigation_handler {
+    if let Some(i) = get_navigation_handler(attributes.navigation_handler) {
       URL_LOADING_OVERRIDE
         .lock()
         .unwrap()
